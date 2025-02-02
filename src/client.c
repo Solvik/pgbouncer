@@ -1362,38 +1362,30 @@ static bool handle_client_startup(PgSocket *client, PktHdr *pkt)
 
 char *sanitize_sql_query_alloc(const char *input) {
     size_t len = strlen(input);
-    char *output = malloc(len + 1);  // Allocate maximum needed length.
     size_t i = 0, j = 0;
-    int last_was_space = 0;
+
+    // Allocate enough memory: worst-case every character needs escaping.
+    char *output = malloc(2 * len + 1);
     if (!output)
 	return NULL;
 
-
     while (input[i] != '\0') {
 	char c = input[i];
-
-	// Replace newline, carriage return, and tab with a space.
-	if (c == '\n' || c == '\r' || c == '\t')
-	    c = ' ';
-
-	// Only add one space if the previous character was a space.
-	if (c == ' ') {
-	    if (!last_was_space) {
-		output[j++] = c;
-		last_was_space = 1;
-	    }
+	if (c == '\n') {
+	    output[j++] = '\\';
+	    output[j++] = 'n';
+	} else if (c == '\t') {
+	    output[j++] = '\\';
+	    output[j++] = 't';
+	} else if (c == '\r') {
+	    output[j++] = '\\';
+	    output[j++] = 'r';
 	} else {
 	    output[j++] = c;
-	    last_was_space = 0;
 	}
 	i++;
     }
-
-    // Remove trailing space if present.
-    if (j > 0 && output[j - 1] == ' ')
-	j--;
     output[j] = '\0';
-
     return output;
 }
 
