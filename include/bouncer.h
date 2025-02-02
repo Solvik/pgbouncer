@@ -838,6 +838,7 @@ extern int cf_tcp_user_timeout;
 extern int cf_log_connections;
 extern int cf_log_disconnections;
 extern int cf_log_pooler_errors;
+extern int cf_log_queries;
 extern int cf_application_name_add_host;
 
 extern int cf_client_tls_sslmode;

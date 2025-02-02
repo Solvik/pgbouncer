@@ -174,6 +174,7 @@ int cf_log_stats;
 int cf_log_connections;
 int cf_log_disconnections;
 int cf_log_pooler_errors;
+int cf_log_queries;
 int cf_application_name_add_host;
 
 int cf_client_tls_sslmode;
@@ -277,6 +278,7 @@ static const struct CfKey bouncer_params [] = {
 	CF_ABS("log_connections", CF_INT, cf_log_connections, 0, "1"),
 	CF_ABS("log_disconnections", CF_INT, cf_log_disconnections, 0, "1"),
 	CF_ABS("log_pooler_errors", CF_INT, cf_log_pooler_errors, 0, "1"),
+	CF_ABS("log_queries", CF_INT, cf_log_queries, 0, "1"),
 	CF_ABS("log_stats", CF_INT, cf_log_stats, 0, "1"),
 	CF_ABS("logfile", CF_STR, cf_logfile, 0, ""),
 	CF_ABS("max_client_conn", CF_INT, cf_max_client_conn, 0, "100"),

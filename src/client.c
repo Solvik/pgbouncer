@@ -1359,6 +1359,44 @@ static bool handle_client_startup(PgSocket *client, PktHdr *pkt)
 	return true;
 }
 
+
+char *sanitize_sql_query_alloc(const char *input) {
+    size_t len = strlen(input);
+    char *output = malloc(len + 1);  // Allocate maximum needed length.
+    size_t i = 0, j = 0;
+    int last_was_space = 0;
+    if (!output)
+	return NULL;
+
+
+    while (input[i] != '\0') {
+	char c = input[i];
+
+	// Replace newline, carriage return, and tab with a space.
+	if (c == '\n' || c == '\r' || c == '\t')
+	    c = ' ';
+
+	// Only add one space if the previous character was a space.
+	if (c == ' ') {
+	    if (!last_was_space) {
+		output[j++] = c;
+		last_was_space = 1;
+	    }
+	} else {
+	    output[j++] = c;
+	    last_was_space = 0;
+	}
+	i++;
+    }
+
+    // Remove trailing space if present.
+    if (j > 0 && output[j - 1] == ' ')
+	j--;
+    output[j] = '\0';
+
+    return output;
+}
+
 /* decide on packets of logged-in client */
 static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 {
@@ -1366,6 +1404,8 @@ static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 	int track_outstanding = false;
 	PreparedStatementAction ps_action = PS_IGNORE;
 	PgClosePacket close_packet;
+	int log_query = false;
+	const char *query;
 
 	switch (pkt->type) {
 	/* one-packet queries */
@@ -1376,6 +1416,9 @@ static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 			return false;
 		}
 		track_outstanding = true;
+		if (cf_log_queries) {
+		  log_query = true;
+		}
 		break;
 	case PqMsg_FunctionCall:
 		track_outstanding = true;
@@ -1602,6 +1645,18 @@ static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 		return true;
 	}
 
+	if (log_query == true) {
+	  if (!mbuf_get_string(&pkt->data, &query)) {
+	    slog_noise(client, "logging_client_query: failed to extract query");
+	  } else {
+	    char *sanitized_query = sanitize_sql_query_alloc(query);
+	    if (!sanitized_query) {
+	      slog_noise(client, "logging_client_query: failed to sanitize query");
+	    }
+	    slog_info(client, "logging_client_query: query=%s", sanitized_query);
+	    free(sanitized_query);
+	  }
+	}
 	sbuf_prepare_send(sbuf, &client->link->sbuf, pkt->len);
 
 	return true;

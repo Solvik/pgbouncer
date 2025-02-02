@@ -70,3 +70,5 @@ bool cf_set_authdb(struct CfValue *cv, const char *value);
 
 /* reserved database name checking */
 bool check_reserved_database(const char *value);
+
+char *sanitize_sql_query_alloc(const char *input);
