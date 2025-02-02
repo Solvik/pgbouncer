@@ -1652,8 +1652,9 @@ static bool handle_client_work(PgSocket *client, PktHdr *pkt)
 	    char *sanitized_query = sanitize_sql_query_alloc(query);
 	    if (!sanitized_query) {
 	      slog_noise(client, "logging_client_query: failed to sanitize query");
+	    } else {
+	      slog_info(client, "logging_client_query: query=%s", sanitized_query);
 	    }
-	    slog_info(client, "logging_client_query: query=%s", sanitized_query);
 	    free(sanitized_query);
 	  }
 	}
