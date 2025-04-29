@@ -966,6 +966,10 @@ void cleanup_inactive_users(void)
     const usec_t    THRESHOLD = 1ULL * 60ULL * 1000000ULL;  /* 1h in µs */
     struct List *pitem, *ptmp;
 
+    /* clean inactive pools only if configured */
+    if (cf_user_pool_idle_timeout <= 0)
+      return
+ 
     statlist_for_each_safe(uitem, &user_list, utmp) {
 	PgGlobalUser *user = container_of(uitem, PgGlobalUser, head);
 	usec_t idle = now - user->last_login_time;

@@ -461,7 +461,6 @@ struct PgPool {
 
 	bool welcome_msg_ready : 1;
 
-
 	uint16_t rrcounter;		/* round-robin counter */
 };
 
