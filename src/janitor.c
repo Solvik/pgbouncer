@@ -309,6 +309,7 @@ static int per_loop_wait_close(PgPool *pool)
 	return count;
 }
 
+
 /*
  * this function is called for each event loop.
  */
@@ -327,6 +328,7 @@ void per_loop_maint(void)
 		if (stime >= cf_suspend_timeout)
 			force_suspend = true;
 	}
+
 
 	statlist_for_each(item, &pool_list) {
 		pool = container_of(item, PgPool, head);
@@ -797,6 +799,7 @@ static void do_full_maint(evutil_socket_t sock, short flags, void *arg)
 	}
 
 	cleanup_inactive_autodatabases();
+	cleanup_inactive_users();
 
 	cleanup_client_logins();
 
@@ -948,4 +951,57 @@ void config_postprocess(void)
 			continue;
 		}
 	}
+}
+
+
+/*
+ * Tear down *only* those pools belonging to a user which
+ * (a) last_login_time is >1h ago
+ * (b) have zero active clients in *all* their pools
+ */
+void cleanup_inactive_users(void)
+{
+    struct List    *uitem, *utmp;
+    usec_t          now       = get_cached_time();
+    const usec_t    THRESHOLD = 1ULL * 60ULL * 1000000ULL;  /* 1h in µs */
+    struct List *pitem, *ptmp;
+
+    /* clean inactive pools only if configured */
+    if (cf_user_pool_idle_timeout <= 0)
+      return
+ 
+    statlist_for_each_safe(uitem, &user_list, utmp) {
+	PgGlobalUser *user = container_of(uitem, PgGlobalUser, head);
+	usec_t idle = now - user->last_login_time;
+
+	/* skip uninitialized timestamp or not stale yet*/
+	if (user->last_login_time == 0 || idle < THRESHOLD)
+	    continue;
+
+	/* skip if there are any live clients for this user */
+	if (user->client_connection_count > 0) {
+	    log_debug("cleanup_inactive_users: \"%s\" idle %llus but has %d live clients, skipping",
+		      user->credentials.name,
+		      (long long)(idle / 1000000ULL),
+		      user->client_connection_count);
+	    continue;
+	}
+	/* skip if they already have no pools left */
+	if (user->pool_list.next == &user->pool_list)
+	    continue;
+
+
+	/* now rip out all their pools in one pass */
+	log_info("cleanup_inactive_users: \"%s\" idle %llus, deletingpools",
+		 user->credentials.name,
+		 (long long)(idle / 1000000ULL));
+
+	    list_for_each_safe(pitem, &user->pool_list, ptmp) {
+		PgPool *pool = container_of(pitem, PgPool, map_head);
+		log_debug("  killing pool for db \"%s\"", pool->db->name);
+		kill_pool(pool);
+	}
+	/* bump so we only reap once per hour */
+	user->last_login_time = now;
+    }
 }
