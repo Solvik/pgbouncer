@@ -959,61 +959,45 @@ void config_postprocess(void)
  * (a) last_login_time is >1h ago
  * (b) have zero active clients in *all* their pools
  */
-void
-cleanup_inactive_users(void)
+void cleanup_inactive_users(void)
 {
-    struct List    *item, *tmp;
-    PgGlobalUser   *user;
+    struct List    *uitem, *utmp;
     usec_t          now       = get_cached_time();
-    const usec_t    THRESHOLD = 60ULL * 60ULL * 1000000ULL;
+    const usec_t    THRESHOLD = 1ULL * 60ULL * 1000000ULL;  /* 1h in µs */
+    struct List *pitem, *ptmp;
 
-    log_debug("cleanup_inactive_users: threshold = %lld seconds",
-	      (long long)(THRESHOLD ));
+    statlist_for_each_safe(uitem, &user_list, utmp) {
+	PgGlobalUser *user = container_of(uitem, PgGlobalUser, head);
+	usec_t idle = now - user->last_login_time;
 
-    /* iterate over every global user */
-    statlist_for_each_safe(item, &user_list, tmp) {
-	user = container_of(item, PgGlobalUser, head);
-
-		/* never initialized? skip */
-	if (user->last_login_time == 0)
-	    continue;
-	/* empty‐name user? skip */
-	if (user->credentials.name[0] == '\0')
+	/* skip uninitialized timestamp or not stale yet*/
+	if (user->last_login_time == 0 || idle < THRESHOLD)
 	    continue;
 
-
-	/* not stale yet? skip */
-	if (now - user->last_login_time <= THRESHOLD)
+	/* skip if there are any live clients for this user */
+	if (user->client_connection_count > 0) {
+	    log_debug("cleanup_inactive_users: \"%s\" idle %llus but has %d live clients, skipping",
+		      user->credentials.name,
+		      (long long)(idle / 1000000ULL),
+		      user->client_connection_count);
 	    continue;
-	log_info("user \"%s\" idle for %lld seconds—checking pools",
+	}
+	/* skip if they already have no pools left */
+	if (user->pool_list.next == &user->pool_list)
+	    continue;
+
+
+	/* now rip out all their pools in one pass */
+	log_info("cleanup_inactive_users: \"%s\" idle %llus, deletingpools",
 		 user->credentials.name,
-		 (long long)((now - user->last_login_time)));
+		 (long long)(idle / 1000000ULL));
 
-	/* does any pool still have active clients? */
-	struct List *pitem;
-	PgPool      *pool;
-	bool         has_active = false;
-	list_for_each(pitem, &user->pool_list) {
-	    pool = container_of(pitem, PgPool, map_head);
-	    if (pool_client_count(pool) > 0) {
-		has_active = true;
-		break;
-	    }
+	    list_for_each_safe(pitem, &user->pool_list, ptmp) {
+		PgPool *pool = container_of(pitem, PgPool, map_head);
+		log_debug("  killing pool for db \"%s\"", pool->db->name);
+		kill_pool(pool);
 	}
-	if (has_active) {
-	  log_debug("  user \"%s\" still has active clients—skipping",
-		    user->credentials.name);
-	    continue;
-	}
-	log_info("  no active clients for user \"%s\", tearing downpools",
-		 user->credentials.name);
-
-	/* otherwise: kill *all* their pools */
-	list_for_each_safe(pitem, &user->pool_list, tmp) {
-	    pool = container_of(pitem, PgPool, map_head);
-	    log_debug("    killing pool for db \"%s\"", pool->db->name);
-
-	    kill_pool(pool);
-	}
+	/* bump so we only reap once per hour */
+	user->last_login_time = now;
     }
 }
