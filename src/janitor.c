@@ -965,15 +965,29 @@ cleanup_inactive_users(void)
     struct List    *item, *tmp;
     PgGlobalUser   *user;
     usec_t          now       = get_cached_time();
-    const usec_t    THRESHOLD = 3600;
+    const usec_t    THRESHOLD = 60ULL * 60ULL * 1000000ULL;
+
+    log_debug("cleanup_inactive_users: threshold = %lld seconds",
+	      (long long)(THRESHOLD ));
 
     /* iterate over every global user */
     statlist_for_each_safe(item, &user_list, tmp) {
 	user = container_of(item, PgGlobalUser, head);
 
+		/* never initialized? skip */
+	if (user->last_login_time == 0)
+	    continue;
+	/* empty‐name user? skip */
+	if (user->credentials.name[0] == '\0')
+	    continue;
+
+
 	/* not stale yet? skip */
 	if (now - user->last_login_time <= THRESHOLD)
 	    continue;
+	log_info("user \"%s\" idle for %lld seconds—checking pools",
+		 user->credentials.name,
+		 (long long)((now - user->last_login_time)));
 
 	/* does any pool still have active clients? */
 	struct List *pitem;
@@ -986,12 +1000,19 @@ cleanup_inactive_users(void)
 		break;
 	    }
 	}
-	if (has_active)
+	if (has_active) {
+	  log_debug("  user \"%s\" still has active clients—skipping",
+		    user->credentials.name);
 	    continue;
+	}
+	log_info("  no active clients for user \"%s\", tearing downpools",
+		 user->credentials.name);
 
 	/* otherwise: kill *all* their pools */
 	list_for_each_safe(pitem, &user->pool_list, tmp) {
 	    pool = container_of(pitem, PgPool, map_head);
+	    log_debug("    killing pool for db \"%s\"", pool->db->name);
+
 	    kill_pool(pool);
 	}
     }
