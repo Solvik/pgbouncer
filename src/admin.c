@@ -21,6 +21,7 @@
  */
 
 #include "bouncer.h"
+#include "janitor.h"
 
 #include <usual/regex.h>
 #include <usual/netdb.h>
@@ -28,6 +29,7 @@
 #include <usual/safeio.h>
 #include <usual/slab.h>
 #include <usual/strpool.h>
+#include <string.h>
 
 /* regex elements */
 #define WS0     "[ \t\n\r]*"
@@ -1430,6 +1432,74 @@ static PgSocket *find_client_global(unsigned long long int target_id)
 	return NULL;
 }
 
+/* Command: KILL_POOL */
+static bool admin_cmd_kill_pool(PgSocket *admin, const char *query) {
+       char dbname[MAX_DBNAME];
+       char username[MAX_USERNAME];
+       const char *slash_ptr;
+       int db_len;
+       int user_len;
+       PgPool *pool_to_kill = NULL;
+       struct List *item;
+
+       // 1. Check admin permissions
+       if (!admin->admin_user) {
+	       return admin_error(admin, "KILL_POOL requires admin user");
+       }
+
+       // 2. Find the '/' separator in the combined argument string passed in 'query'
+       slash_ptr = strchr(query, '/');
+       if (!slash_ptr || slash_ptr == query || *(slash_ptr + 1) == '\0') {
+	       // '/' not found, or at the very beginning/end.
+	       // Provide specific usage format in error message.
+	       return admin_error(admin, "Usage: KILL_POOL \"database/user\"");
+       }
+
+       // 3. Calculate lengths of the two parts and check against buffer sizes
+       db_len = slash_ptr - query;
+       user_len = strlen(query) - db_len - 1; // Length after the slash
+
+       if (db_len <= 0 || db_len >= MAX_DBNAME) {
+	       return admin_error(admin, "Invalid database name length in argument");
+       }
+       if (user_len <= 0 || user_len >= MAX_USERNAME) {
+	       return admin_error(admin, "Invalid user name length in argument");
+       }
+
+       // 4. Copy parts into separate null-terminated buffers
+       memcpy(dbname, query, db_len);
+       dbname[db_len] = '\0';
+
+       memcpy(username, slash_ptr + 1, user_len);
+       username[user_len] = '\0';
+
+       // 5. Find the pool by iterating the global pool list and comparing names
+       statlist_for_each(item, &pool_list) {
+	       PgPool *p = container_of(item, PgPool, head);
+
+	       // Check if pool has valid db/user, isn't admin db, and names match
+	       if (p->db && p->user_credentials && !p->db->admin &&
+		   strcmp(p->db->name, dbname) == 0 &&
+		   strcmp(p->user_credentials->name, username) == 0)
+	       {
+		       pool_to_kill = p;
+		       break; // Found the pool by name comparison
+	       }
+       }
+
+       // 6. Check if pool was found
+       if (!pool_to_kill) {
+	       return admin_error(admin, "Pool for database '%s' and user '%s' not found", dbname, username);
+       }
+
+       // 7. Log the action and call kill_pool()
+       log_info("Admin command: KILL_POOL %s/%s", dbname, username);
+       kill_pool(pool_to_kill); // THE ACTUAL KILL ACTION
+
+       // 8. Send success message back to the admin client
+       return admin_ready(admin, "KILL_POOL");
+}
+
 /* Command: KILL_CLIENT */
 static bool admin_cmd_kill_client(PgSocket *admin, const char *arg)
 {
@@ -1586,6 +1656,7 @@ static bool admin_show_help(PgSocket *admin, const char *arg)
 		     "\tRECONNECT [<db>]\n"
 		     "\tKILL <db>\n"
 		     "\tKILL_CLIENT <client_id>\n"
+		     "\tKILL_POOL \"<db>/<user>\" \n"
 		     "\tSUSPEND\n"
 		     "\tSHUTDOWN\n"
 		     "\tSHUTDOWN WAIT_FOR_SERVERS|WAIT_FOR_CLIENTS\n"
@@ -1672,6 +1743,7 @@ static struct cmd_lookup cmd_list [] = {
 	{"enable", admin_cmd_enable},
 	{"kill", admin_cmd_kill},
 	{"kill_client", admin_cmd_kill_client},
+	{"kill_pool", admin_cmd_kill_pool},
 	{"pause", admin_cmd_pause},
 	{"reconnect", admin_cmd_reconnect},
 	{"reload", admin_cmd_reload},
