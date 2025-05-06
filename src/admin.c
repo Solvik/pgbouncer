@@ -1761,7 +1761,7 @@ static bool admin_parse_query(PgSocket *admin, const char *q)
 {
 	regmatch_t grp[MAX_GROUPS];
 	char cmd[16];
-	char arg[64];
+	char arg[MAX_DBNAME + MAX_USERNAME + 2];
 	char val[256];
 	bool res;
 	bool ok;
